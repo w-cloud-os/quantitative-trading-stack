@@ -1,0 +1,45 @@
+version: "1.0"
+preset_name: paper_trading
+environment: paper          # only "paper" or "backtest" are accepted; there is no live mode
+
+data:
+  tickers: [AAPL, MSFT, GOOGL, AMZN, TSLA, JPM]
+  lookback_days: 756
+  frequency: "1d"
+  sectors:
+    AAPL: Tech
+    MSFT: Tech
+    GOOGL: Tech
+    AMZN: Consumer
+    TSLA: Consumer
+    JPM: Financials
+
+optimization:
+  risk_measure: CVAR
+  max_asset_weight: 0.35
+  min_asset_weight: 0.0
+  l2_coef: 0.01
+  max_weight_change: 0.25     # per-asset cap on |new - previous| weight at each rebalance
+  denoise_covariance: true
+  shrink_mu: true
+  train_window: 252
+  sector_max: {Tech: 0.50}
+  sector_min: {Financials: 0.10}
+
+forecast:
+  enabled: true
+  window: 63
+  full_confidence_tstat: 2.0
+
+execution:
+  venue: SIM
+  base_currency: USD
+  initial_capital: 1000000.0
+  rebalance_interval_bars: 20
+  execution_lag_bars: 1       # decide at close t, trade at close t+1 (no same-bar look-ahead)
+  fee_rate: 0.0005            # 5 bps of notional
+  cash_buffer: 0.01
+  risk_limits:
+    max_drawdown_pct: 0.10
+    max_order_value: 250000.0
+    max_position_leverage: 1.0

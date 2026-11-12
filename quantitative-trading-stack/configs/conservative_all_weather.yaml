@@ -1,0 +1,29 @@
+version: "1.0"
+preset_name: conservative_all_weather
+environment: paper
+
+data:
+  tickers: [SPY, TLT, GLD, IEF, DBC]
+  lookback_days: 1260
+  frequency: "1d"
+  sectors: {SPY: Equity, TLT: Bonds, IEF: Bonds, GLD: Commodities, DBC: Commodities}
+
+optimization:
+  risk_measure: CVAR
+  max_asset_weight: 0.30
+  min_asset_weight: 0.05
+  l2_coef: 0.05
+  max_weight_change: 0.10
+  train_window: 252
+  sector_max: {Bonds: 0.55, Equity: 0.35}
+
+forecast:
+  enabled: true
+  window: 63
+
+execution:
+  initial_capital: 1000000.0
+  rebalance_interval_bars: 20
+  risk_limits:
+    max_drawdown_pct: 0.05    # tight on purpose; the kill-switch latches until you restart
+    max_order_value: 250000.0

@@ -1,0 +1,28 @@
+version: "1.0"
+preset_name: aggressive_growth   # max-ratio on tech names; there is NO momentum signal in this preset
+environment: paper
+
+data:
+  tickers: [AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA]
+  lookback_days: 504
+  frequency: "1d"
+  sectors: {AAPL: Tech, MSFT: Tech, NVDA: Tech, GOOGL: Tech, META: Tech, AMZN: Consumer, TSLA: Consumer}
+
+optimization:
+  risk_measure: VARIANCE
+  max_asset_weight: 0.35
+  min_asset_weight: 0.0
+  l2_coef: 0.01
+  max_weight_change: 0.30
+  train_window: 252
+
+forecast:
+  enabled: true
+  window: 63
+
+execution:
+  initial_capital: 500000.0
+  rebalance_interval_bars: 10
+  risk_limits:
+    max_drawdown_pct: 0.15
+    max_order_value: 200000.0
