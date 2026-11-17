@@ -68,6 +68,8 @@ All screenshots use **synthetic random prices** (seed 42, `aggressive_growth` pr
 ![Strategy vs equal-weight benchmark](docs/screenshots/performance.png)
 ![Metrics](docs/screenshots/metrics.png)
 ![Kill-switch trip](docs/screenshots/kill-switch.png)
+![Drawdown](docs/screenshots/drawdown.png)
+![Allocation over time](docs/screenshots/allocation.png)
 
 ## What this does and doesn't do
 
