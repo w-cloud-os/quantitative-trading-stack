@@ -60,6 +60,20 @@ commercial use, so treat it as a research source only.
 Docker (not exercised in CI): `docker compose up --build` serves the dashboard on port 8501;
 `docker compose --profile tools run --rm backtest` runs the CLI backtest.
 
+## Screenshots
+
+All screenshots use **synthetic random prices** (seed 42, `aggressive_growth` preset), so the results say nothing about real markets. The benchmark is a frictionless equal-weight portfolio; the strategy pays 5 bps per trade.
+
+![Setup](docs/screenshots/setup.png)
+![Strategy vs equal-weight benchmark](docs/screenshots/performance.png)
+![Metrics](docs/screenshots/metrics.png)
+![Kill-switch trip](docs/screenshots/kill-switch.png)
+
+## What this does and doesn't do
+
+**Does:** optimizes portfolio weights (skfolio), simulates execution (NautilusTrader), applies fees and a drawdown kill-switch, and compares against an equal-weight benchmark.
+**Doesn't:** place live orders, use real market data by default, or demonstrate a profitable strategy.
+
 ## How the engines are verified
 
 `simulate()` (a fast reference simulator) and the NautilusTrader strategy implement the same rules:
