@@ -73,8 +73,16 @@ All screenshots use **synthetic random prices** (seed 42, `aggressive_growth` pr
 
 ## What this does and doesn't do
 
-**Does:** optimizes portfolio weights (skfolio), simulates execution (NautilusTrader), applies fees and a drawdown kill-switch, and compares against an equal-weight benchmark.
-**Doesn't:** place live orders, use real market data by default, or demonstrate a profitable strategy.
+**Does:**
+- Optimizes portfolio weights (skfolio)
+- Simulates execution (NautilusTrader)
+- Applies fees and a drawdown kill-switch
+- Compares against an equal-weight benchmark
+
+**Doesn't:**
+- Place live orders
+- Use real market data by default
+- Demonstrate a profitable strategy
 
 ## How the engines are verified
 
