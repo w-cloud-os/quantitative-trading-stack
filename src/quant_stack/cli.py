@@ -10,8 +10,19 @@ import sys
 from pathlib import Path
 
 from quant_stack.backtest.runner import run_reference_backtest
+from quant_stack.backtest.sweep import DEFAULT_END_DATE, run_seed_sweep
 from quant_stack.config import load_config
 from quant_stack.data.providers import get_provider
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
 
 
 def _fmt(metrics: dict[str, float]) -> str:
@@ -40,6 +51,15 @@ def main(argv: list[str] | None = None) -> int:
     bt.add_argument("--engine", default="vectorized", choices=["vectorized", "nautilus", "both"])
     bt.add_argument("--seed", type=int, default=42, help="synthetic provider seed")
     bt.add_argument("--end", help="end date YYYY-MM-DD (default: today)")
+    sweep = sub.add_parser("sweep", help="compare strategy and equal-weight returns across seeds")
+    sweep.add_argument("--preset", required=True, help="preset name from the configs directory")
+    sweep.add_argument("--seeds", required=True, type=_positive_int, help="number of seeds to run")
+    sweep.add_argument("--workers", type=_positive_int, default=1, help="parallel worker processes")
+    sweep.add_argument(
+        "--end-date",
+        default=DEFAULT_END_DATE,
+        help=f"end date YYYY-MM-DD (default: {DEFAULT_END_DATE})",
+    )
     dash = sub.add_parser("dashboard", help="launch the Streamlit research dashboard")
     dash.add_argument("--host", default="127.0.0.1")
     dash.add_argument("--port", type=int, default=8501)
@@ -48,6 +68,44 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "WARNING").upper())
     if args.command == "dashboard":
         return subprocess.call(dashboard_command(args.host, args.port))
+    if args.command == "sweep":
+        if Path(args.preset).name != args.preset:
+            parser.error("--preset must be a preset name, not a path")
+        config_dir = Path(os.environ.get("QUANT_STACK_CONFIG_DIR", "configs"))
+        config_path = next(
+            (
+                path
+                for path in (config_dir / f"{args.preset}.yaml", config_dir / f"{args.preset}.yml")
+                if path.is_file()
+            ),
+            None,
+        )
+        if config_path is None:
+            parser.error(f"preset '{args.preset}' not found in {config_dir}")
+        cfg = load_config(config_path)
+        print("Backtest path: vectorized reference simulator (shared CLI/dashboard path).")
+        try:
+            results, summary, csv_path, png_path = run_seed_sweep(
+                cfg, args.seeds, args.end_date, args.workers, output_name=args.preset
+            )
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        print(f"Results: {csv_path} | {png_path}")
+        print(f"Return difference (strategy - benchmark), {len(results)} seeds:")
+        print(f"  Mean: {summary.mean_difference:.2%}")
+        print(f"  Median: {summary.median_difference:.2%}")
+        print(f"  Std: {summary.std_difference:.2%}")
+        print(f"  Strategy beats benchmark: {summary.strategy_win_rate:.1%}")
+        if summary.confidence_interval is None:
+            print(
+                "  95% confidence interval for mean difference: unavailable (need at least 2 seeds)"
+            )
+        else:
+            lower, upper = summary.confidence_interval
+            print(f"  95% confidence interval for mean difference: [{lower:.2%}, {upper:.2%}]")
+        print(f"  Kill-switch trip rate: {summary.kill_switch_trip_rate:.1%}")
+        return 0
     cfg = load_config(args.config)
     kwargs: dict = {"synthetic": {"seed": args.seed}, "csv": {"path": args.csv_path}}.get(
         args.provider, {}
