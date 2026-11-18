@@ -107,12 +107,12 @@ The sweep runs the same reference backtest on 200 different random price histori
 
 - In both presets the confidence interval for the mean difference includes zero: there is no detectable difference between the optimizer's weights and equal weights on random prices.
 - The kill-switch shapes the tails. At the 10% limit the strategy trips in 74% of random histories, and once it trips it stays in cash for the rest of the run.
-- The large gaps come from the few seeds where only one side trips. In `aggressive_growth` those were near-threshold cases: the strategy's drawdown crossed the 15% limit while the benchmark's stayed 0.02 to 1.1 points below it. The gaps go both ways, and there are too few of them to say either side is favoured. Setting those seeds aside, the mean difference is within 0.1 points of zero in both presets.
+- The large gaps come from kill-switch timing. In the 3 seeds per preset where only one side tripped, the side that did not trip stayed 0.02 to 1.9 points below its limit, so a tiny difference at the threshold decided whether a portfolio sat in cash for the rest of the run. In `paper_trading`, three more large gaps (10 to 24 points) come from seeds where both tripped but 169 to 308 days apart. The gaps go both ways, and there are too few of them to say either side is favoured. Setting the one-sided seeds aside, the mean difference is within 0.1 points of zero in both presets.
 
 ![Seed sweep histogram, aggressive_growth](results/seed_sweep_aggressive_growth.png)
 ![Seed sweep histogram, paper_trading](results/seed_sweep_paper_trading.png)
 
-*Return difference per seed (strategy minus benchmark), as a fraction: -0.1 means the strategy finished 10 points behind. The isolated bars far from zero are the few seeds where only one side hit the kill-switch.*
+*Return difference per seed (strategy minus benchmark), as a fraction: -0.1 means the strategy finished 10 points behind. The distant bars are mostly kill-switch timing: seeds where only one side tripped, or where both tripped months apart. In `aggressive_growth` the one far bar is such a seed. In `paper_trading`, 6 of the 7 seeds more than 10 points from zero are of this kind, and the seventh is a high-return path where neither tripped.*
 
 These are results on synthetic random prices. They say nothing about real markets.
 
