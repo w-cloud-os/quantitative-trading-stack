@@ -88,19 +88,31 @@ All screenshots use **synthetic random prices** (seed 42, `paper_trading` preset
 
 ```bash
 quant-stack sweep --preset aggressive_growth --seeds 200 --workers 2
+quant-stack sweep --preset paper_trading --seeds 200 --workers 2
 ```
 
-The sweep runs the same reference backtest on 200 different random price histories (seeds 0 to 199, fixed end date, so the same command always gives the same CSV) and compares the strategy with the equal-weight benchmark. It writes a CSV and a histogram to `results/`. The plot needs matplotlib, which is part of the `dev` extra.
+The sweep runs the same reference backtest on 200 different random price histories (seeds 0 to 199, fixed end date, so the same command always gives the same CSV) and compares the strategy with the equal-weight benchmark. It writes a CSV and a histogram to `results/`, and the printed summary splits the seeds by whether the kill-switch tripped for the strategy, the benchmark, both or neither. The plot needs matplotlib, which is part of the `dev` extra.
 
-Results for the `aggressive_growth` preset (15% drawdown kill-switch):
+| | `aggressive_growth` (15% kill-switch) | `paper_trading` (10% kill-switch) |
+|---|---|---|
+| Mean difference (strategy minus benchmark) | -0.23% (95% CI -0.65% to +0.20%) | -0.43% (95% CI -1.38% to +0.53%) |
+| Median difference | -0.03% | 0.00% |
+| Strategy beats benchmark | 46.0% of seeds | 48.5% of seeds |
+| Strategy hit the kill-switch | 13.5% of seeds | 74.0% of seeds |
+| Neither tripped | 173 seeds, mean +0.06%, std 1.44 pts | 51 seeds, mean -0.42%, std 3.38 pts |
+| Both tripped | 24 seeds, mean -0.27%, std 0.73 pts | 146 seeds, mean +0.08%, std 2.94 pts |
+| Only the strategy tripped | 3 seeds, mean -16.38% | 2 seeds, mean -54.22% |
+| Only the benchmark tripped | 0 seeds | 1 seed, +32.35% |
+| Extra fees paid by the strategy per run | about $271 | about $651 |
 
-- Across all 200 seeds the mean return difference (strategy minus benchmark) was -0.23% (95% CI -0.65% to +0.20%) and the median was -0.03%. The strategy beat the benchmark in 46% of seeds. There is no detectable difference.
-- In the 173 seeds where neither portfolio hit the kill-switch, the mean difference was +0.06% with a standard deviation of about 1.4 points. Averaged over all 200 seeds, the strategy paid about $271 more in fees per run than the benchmark.
-- The only large gaps came from 3 seeds where just the strategy hit the kill-switch. In those seeds the strategy's drawdown crossed the 15% limit while the benchmark's stayed 0.02 to 1.1 points below it. A trip halts trading for the rest of the run, so a tiny difference at the threshold produced a large difference in outcome. In another 24 seeds both portfolios tripped and ended close together (mean difference -0.27%).
+- In both presets the confidence interval for the mean difference includes zero: there is no detectable difference between the optimizer's weights and equal weights on random prices.
+- The kill-switch matters more than the optimizer. At the 10% limit the strategy trips in 74% of random histories, and once it trips it stays in cash for the rest of the run.
+- The large gaps come from the few seeds where only one side trips. In `aggressive_growth` those were near-threshold cases: the strategy's drawdown crossed the 15% limit while the benchmark's stayed 0.02 to 1.1 points below it. The gaps go both ways, and there are too few of them to say either side is favoured. Setting those seeds aside, the mean difference is within 0.1 points of zero in both presets.
 
-![Seed sweep histogram](results/seed_sweep_aggressive_growth.png)
+![Seed sweep histogram, aggressive_growth](results/seed_sweep_aggressive_growth.png)
+![Seed sweep histogram, paper_trading](results/seed_sweep_paper_trading.png)
 
-*Return difference per seed (strategy minus benchmark), as a fraction: -0.1 means the strategy finished 10 points behind. The far-left bar is a single seed (167) where only the strategy hit the kill-switch.*
+*Return difference per seed (strategy minus benchmark), as a fraction: -0.1 means the strategy finished 10 points behind. The isolated bars far from zero are the few seeds where only one side hit the kill-switch.*
 
 These are results on synthetic random prices. They say nothing about real markets.
 
