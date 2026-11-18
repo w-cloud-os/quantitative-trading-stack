@@ -35,7 +35,7 @@ Requires **Python 3.12+** (NautilusTrader does not support 3.11).
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
-pytest                                                  # 56 tests, includes the engine cross-check
+pytest                                                  # 57 tests, includes the engine cross-check
 quant-stack backtest --config configs/paper_trading.yaml --engine both
 quant-stack dashboard                                   # http://127.0.0.1:8501
 ```
@@ -106,7 +106,7 @@ The sweep runs the same reference backtest on 200 different random price histori
 | Extra fees paid by the strategy per run | about $271 | about $651 |
 
 - In both presets the confidence interval for the mean difference includes zero: there is no detectable difference between the optimizer's weights and equal weights on random prices.
-- The kill-switch matters more than the optimizer. At the 10% limit the strategy trips in 74% of random histories, and once it trips it stays in cash for the rest of the run.
+- The kill-switch shapes the tails. At the 10% limit the strategy trips in 74% of random histories, and once it trips it stays in cash for the rest of the run.
 - The large gaps come from the few seeds where only one side trips. In `aggressive_growth` those were near-threshold cases: the strategy's drawdown crossed the 15% limit while the benchmark's stayed 0.02 to 1.1 points below it. The gaps go both ways, and there are too few of them to say either side is favoured. Setting those seeds aside, the mean difference is within 0.1 points of zero in both presets.
 
 ![Seed sweep histogram, aggressive_growth](results/seed_sweep_aggressive_growth.png)
