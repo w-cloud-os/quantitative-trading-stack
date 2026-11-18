@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
-from quant_stack.backtest.sweep import SweepSummary, run_seed_sweep
+from quant_stack.backtest.sweep import SweepSummary, run_seed_sweep, summarize_sweep
 from quant_stack.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +58,38 @@ def test_seed_sweep_uses_independent_processes_when_requested(cfg, tmp_path: Pat
     assert pd.api.types.is_numeric_dtype(results["return_difference"])
 
 
+def test_summarize_sweep_breaks_down_kill_switch_outcomes():
+    results = pd.DataFrame(
+        {
+            "return_difference": [0.1, 0.3, 0.2, 0.4, 0.5],
+            "strategy_kill_switch_tripped": [False, False, True, True, True],
+            "benchmark_kill_switch_tripped": [False, False, False, False, True],
+            "strategy_fees_paid": [2.0, 4.0, 6.0, 8.0, 10.0],
+            "benchmark_fees_paid": [1.0, 1.0, 2.0, 2.0, 4.0],
+        }
+    )
+
+    summary = summarize_sweep(results)
+
+    assert summary.neither_tripped.count == 2
+    assert summary.neither_tripped.mean == pytest.approx(0.2)
+    assert summary.neither_tripped.median == pytest.approx(0.2)
+    assert summary.neither_tripped.std == pytest.approx(0.1414213562373095)
+    assert summary.only_strategy_tripped.count == 2
+    assert summary.only_strategy_tripped.mean == pytest.approx(0.3)
+    assert summary.only_strategy_tripped.median == pytest.approx(0.3)
+    assert summary.only_strategy_tripped.std == pytest.approx(0.1414213562373095)
+    assert summary.only_benchmark_tripped.count == 0
+    assert summary.only_benchmark_tripped.mean is None
+    assert summary.only_benchmark_tripped.median is None
+    assert summary.only_benchmark_tripped.std is None
+    assert summary.both_tripped.count == 1
+    assert summary.both_tripped.mean == pytest.approx(0.5)
+    assert summary.both_tripped.median == pytest.approx(0.5)
+    assert summary.both_tripped.std is None
+    assert summary.mean_extra_fees == pytest.approx(4.0)
+
+
 def test_sweep_cli_uses_fixed_default_end_date_and_preset_name(monkeypatch, tmp_path, capsys):
     call = {}
 
@@ -83,4 +116,9 @@ def test_sweep_cli_uses_fixed_default_end_date_and_preset_name(monkeypatch, tmp_
         "workers": 1,
         "output_name": "paper_trading",
     }
-    assert "vectorized reference simulator" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "vectorized reference simulator" in output
+    assert "Neither tripped (n=0)" in output
+    assert "Only strategy tripped (n=0)" in output
+    assert "Only benchmark tripped (n=0)" in output
+    assert "Both tripped (n=0)" in output

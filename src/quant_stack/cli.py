@@ -105,6 +105,24 @@ def main(argv: list[str] | None = None) -> int:
             lower, upper = summary.confidence_interval
             print(f"  95% confidence interval for mean difference: [{lower:.2%}, {upper:.2%}]")
         print(f"  Kill-switch trip rate: {summary.kill_switch_trip_rate:.1%}")
+        print("  Return difference by kill-switch outcome:")
+        for label, outcome in (
+            ("Neither tripped", summary.neither_tripped),
+            ("Only strategy tripped", summary.only_strategy_tripped),
+            ("Only benchmark tripped", summary.only_benchmark_tripped),
+            ("Both tripped", summary.both_tripped),
+        ):
+            if outcome.count == 0:
+                print(f"    {label} (n=0)")
+            else:
+                line = (
+                    f"    {label} (n={outcome.count}): mean {outcome.mean:.2%}, "
+                    f"median {outcome.median:.2%}"
+                )
+                if outcome.std is not None:
+                    line += f", std {outcome.std:.2%}"
+                print(line)
+        print(f"  Mean extra fees paid by strategy over benchmark: {summary.mean_extra_fees:.2f}")
         return 0
     cfg = load_config(args.config)
     kwargs: dict = {"synthetic": {"seed": args.seed}, "csv": {"path": args.csv_path}}.get(

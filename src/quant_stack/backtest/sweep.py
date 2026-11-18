@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import repeat
 from pathlib import Path
 
@@ -21,6 +21,14 @@ DEFAULT_END_DATE = "2026-11-17"
 
 
 @dataclass(frozen=True)
+class KillSwitchOutcomeSummary:
+    count: int = 0
+    mean: float | None = None
+    median: float | None = None
+    std: float | None = None
+
+
+@dataclass(frozen=True)
 class SweepSummary:
     mean_difference: float
     median_difference: float
@@ -28,6 +36,15 @@ class SweepSummary:
     strategy_win_rate: float
     confidence_interval: tuple[float, float] | None
     kill_switch_trip_rate: float
+    neither_tripped: KillSwitchOutcomeSummary = field(default_factory=KillSwitchOutcomeSummary)
+    only_strategy_tripped: KillSwitchOutcomeSummary = field(
+        default_factory=KillSwitchOutcomeSummary
+    )
+    only_benchmark_tripped: KillSwitchOutcomeSummary = field(
+        default_factory=KillSwitchOutcomeSummary
+    )
+    both_tripped: KillSwitchOutcomeSummary = field(default_factory=KillSwitchOutcomeSummary)
+    mean_extra_fees: float = 0.0
 
 
 def _run_seed(config_data: dict, seed: int, end_date: str) -> dict:
@@ -67,6 +84,22 @@ def summarize_sweep(results: pd.DataFrame) -> SweepSummary:
     if count > 1:
         margin = float(t.ppf(0.975, count - 1) * np.std(differences, ddof=1) / math.sqrt(count))
         interval = (mean - margin, mean + margin)
+
+    strategy_tripped = results["strategy_kill_switch_tripped"].astype(bool)
+    benchmark_tripped = results["benchmark_kill_switch_tripped"].astype(bool)
+
+    def summarize_group(mask: pd.Series) -> KillSwitchOutcomeSummary:
+        group_differences = results.loc[mask, "return_difference"].to_numpy(dtype=float)
+        group_count = len(group_differences)
+        if group_count == 0:
+            return KillSwitchOutcomeSummary()
+        return KillSwitchOutcomeSummary(
+            count=group_count,
+            mean=float(np.mean(group_differences)),
+            median=float(np.median(group_differences)),
+            std=float(np.std(group_differences, ddof=1)) if group_count > 1 else None,
+        )
+
     return SweepSummary(
         mean_difference=mean,
         median_difference=float(np.median(differences)),
@@ -74,6 +107,13 @@ def summarize_sweep(results: pd.DataFrame) -> SweepSummary:
         strategy_win_rate=float(np.mean(differences > 0)),
         confidence_interval=interval,
         kill_switch_trip_rate=float(results["strategy_kill_switch_tripped"].mean()),
+        neither_tripped=summarize_group(~strategy_tripped & ~benchmark_tripped),
+        only_strategy_tripped=summarize_group(strategy_tripped & ~benchmark_tripped),
+        only_benchmark_tripped=summarize_group(~strategy_tripped & benchmark_tripped),
+        both_tripped=summarize_group(strategy_tripped & benchmark_tripped),
+        mean_extra_fees=float(
+            (results["strategy_fees_paid"] - results["benchmark_fees_paid"]).mean()
+        ),
     )
 
 
