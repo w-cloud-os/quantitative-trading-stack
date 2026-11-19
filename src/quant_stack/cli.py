@@ -7,10 +7,12 @@ import logging
 import os
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 from quant_stack.backtest.runner import run_reference_backtest
 from quant_stack.backtest.sweep import DEFAULT_END_DATE, run_seed_sweep
+from quant_stack.backtest.windows import NoSuccessfulWindowsError, run_window_evaluation
 from quant_stack.config import load_config
 from quant_stack.data.providers import get_provider
 
@@ -23,6 +25,43 @@ def _positive_int(value: str) -> int:
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be at least 1")
     return parsed
+
+
+def _iso_date(value: str) -> str:
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a date in YYYY-MM-DD format") from exc
+    if parsed.isoformat() != value:
+        raise argparse.ArgumentTypeError("must be a date in YYYY-MM-DD format")
+    return value
+
+
+def _drawdown(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number strictly between 0 and 1") from exc
+    if not 0 < parsed < 1:
+        raise argparse.ArgumentTypeError("must be strictly between 0 and 1")
+    return parsed
+
+
+def _load_windows_preset(preset: str):
+    if Path(preset).name != preset:
+        raise ValueError("--preset must be a preset name, not a path")
+    config_dir = Path(os.environ.get("QUANT_STACK_CONFIG_DIR", "configs"))
+    config_path = next(
+        (
+            path
+            for path in (config_dir / f"{preset}.yaml", config_dir / f"{preset}.yml")
+            if path.is_file()
+        ),
+        None,
+    )
+    if config_path is None:
+        raise ValueError(f"preset '{preset}' not found in {config_dir}")
+    return load_config(config_path)
 
 
 def _fmt(metrics: dict[str, float]) -> str:
@@ -60,6 +99,18 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_END_DATE,
         help=f"end date YYYY-MM-DD (default: {DEFAULT_END_DATE})",
     )
+    windows = sub.add_parser(
+        "windows", help="compare strategy and benchmark across historical windows"
+    )
+    windows.add_argument("--preset", required=True, help="preset name from the configs directory")
+    windows.add_argument("--provider", required=True, choices=["yfinance", "csv"])
+    windows.add_argument("--csv-path", help="wide CSV file when --provider csv")
+    windows.add_argument("--start", required=True, type=_iso_date, help="history start YYYY-MM-DD")
+    windows.add_argument(
+        "--end", required=True, type=_iso_date, help="latest window end YYYY-MM-DD"
+    )
+    windows.add_argument("--step-months", type=_positive_int, default=6)
+    windows.add_argument("--max-drawdown", type=_drawdown)
     dash = sub.add_parser("dashboard", help="launch the Streamlit research dashboard")
     dash.add_argument("--host", default="127.0.0.1")
     dash.add_argument("--port", type=int, default=8501)
@@ -123,6 +174,96 @@ def main(argv: list[str] | None = None) -> int:
                     line += f", std {outcome.std:.2%}"
                 print(line)
         print(f"  Mean extra fees paid by strategy over benchmark: {summary.mean_extra_fees:.2f}")
+        return 0
+    if args.command == "windows":
+        if args.start >= args.end:
+            parser.error("--start must be earlier than --end")
+        if args.provider == "csv" and not args.csv_path:
+            parser.error("--csv-path is required when --provider csv")
+        try:
+            cfg = _load_windows_preset(args.preset)
+        except ValueError as exc:
+            parser.error(str(exc))
+        provider_kwargs = {"path": args.csv_path} if args.provider == "csv" else {}
+        try:
+            provider = get_provider(args.provider, **provider_kwargs)
+        except ModuleNotFoundError as exc:
+            if args.provider == "yfinance" and exc.name == "yfinance":
+                print(
+                    'Error: yfinance is not installed; run pip install -e ".[yfinance]"',
+                    file=sys.stderr,
+                )
+                return 1
+            raise
+        effective_drawdown = (
+            args.max_drawdown
+            if args.max_drawdown is not None
+            else cfg.execution.risk_limits.max_drawdown_pct
+        )
+        print(f"Evaluation: historical data ({args.provider}), not synthetic")
+        print(f"Preset: {args.preset} | effective max_drawdown_pct: {effective_drawdown:.2%}")
+        print("Each window is a fresh run; the kill-switch re-arms for every window.")
+        try:
+            results, summary, csv_path, skipped = run_window_evaluation(
+                cfg,
+                provider,
+                args.start,
+                args.end,
+                args.step_months,
+                args.max_drawdown,
+                output_name=args.preset,
+            )
+        except NoSuccessfulWindowsError as exc:
+            for window_end, reason in exc.skipped:
+                print(f"Skipped window ending {window_end}: {reason}")
+            print(f"Skipped windows: {len(exc.skipped)}")
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        except ModuleNotFoundError as exc:
+            if args.provider == "yfinance" and exc.name == "yfinance":
+                print(
+                    'Error: yfinance is not installed; run pip install -e ".[yfinance]"',
+                    file=sys.stderr,
+                )
+                return 1
+            raise
+        for window_end, reason in skipped:
+            print(f"Skipped window ending {window_end}: {reason}")
+        print(f"Skipped windows: {len(skipped)}")
+        print(f"Results: {csv_path}")
+        display_columns = [
+            "window_end",
+            "evaluation_start",
+            "strategy_total_return",
+            "benchmark_total_return",
+            "return_difference",
+            "strategy_kill_switch_date",
+            "benchmark_kill_switch_date",
+            "strategy_fraction_in_cash_after_halt",
+            "independent",
+        ]
+        display = results[display_columns].copy()
+        for column in (
+            "strategy_total_return",
+            "benchmark_total_return",
+            "return_difference",
+            "strategy_fraction_in_cash_after_halt",
+        ):
+            display[column] = display[column].map(lambda value: f"{value:.2%}")
+        print(display.to_string(index=False))
+        print(
+            f"Windows overlap; only the {summary.count} non-overlapping ones are summarized. "
+            f"{summary.count} is too small for significance tests."
+        )
+        print(f"Independent windows: {summary.count}")
+        print(f"  Strategy beat benchmark: {summary.strategy_wins}")
+        print(f"  Mean return difference: {summary.mean_difference:.2%}")
+        print(f"  Median return difference: {summary.median_difference:.2%}")
+        print(f"  Strategy halts: {summary.strategy_halts}")
+        print(f"  Benchmark halts: {summary.benchmark_halts}")
         return 0
     cfg = load_config(args.config)
     kwargs: dict = {"synthetic": {"seed": args.seed}, "csv": {"path": args.csv_path}}.get(
