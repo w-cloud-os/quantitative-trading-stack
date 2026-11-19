@@ -7,7 +7,7 @@ forecast layer and hard risk limits.
 
 > **Not financial advice. Paper/backtest only.** There is no live-trading mode (the config schema
 > rejects `environment: live`). Nothing in this repository is evidence of a profitable strategy:
-> the default demo runs on *synthetic random prices*, where no edge exists by construction.
+> the default demo runs on *synthetic random prices*, where returns are independent over time and only small random per-asset drifts differ, so a forecaster has almost nothing to find.
 
 ## Architecture: four desks, one pipeline
 
@@ -36,7 +36,7 @@ python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\
 pip install -e ".[dev]"
 
 pytest                                                  # 57 tests, includes the engine cross-check
-quant-stack backtest --config configs/paper_trading.yaml --engine both
+quant-stack backtest --config configs/paper_trading.yaml --engine both --end 2024-06-28
 quant-stack dashboard                                   # http://127.0.0.1:8501
 ```
 
