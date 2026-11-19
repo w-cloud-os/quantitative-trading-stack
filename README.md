@@ -35,7 +35,7 @@ Requires **Python 3.12+** (NautilusTrader does not support 3.11).
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
-pytest                                                  # 57 tests, includes the engine cross-check
+pytest                                                  # NN tests, includes the engine cross-check
 quant-stack backtest --config configs/paper_trading.yaml --engine both --end 2024-06-28
 quant-stack dashboard                                   # http://127.0.0.1:8501
 ```
@@ -138,10 +138,10 @@ src/quant_stack/
   forecasting/baseline.py   Forecast + Forecaster protocol
   optimization/             portfolio.py, blend.py, tuning.py (walk-forward grid search)
   backtest/                 schedule.py (walk-forward), simulate.py, metrics.py, runner.py,
-                            sweep.py (seed sweeps)
+                            sweep.py (seed sweeps), windows.py (real-data windows)
   trading/                  strategy.py + engine.py (NautilusTrader)
   dashboard/app.py          Streamlit UI (shows only real simulation output)
-  cli.py                    quant-stack backtest | dashboard | sweep
+  cli.py                    quant-stack backtest | dashboard | sweep | windows
 tests/                      unit, property, parity and smoke tests
 ```
 
