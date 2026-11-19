@@ -35,7 +35,7 @@ Requires **Python 3.12+** (NautilusTrader does not support 3.11).
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
-pytest                                                  # NN tests, includes the engine cross-check
+pytest                                                  # 69 tests, includes the engine cross-check
 quant-stack backtest --config configs/paper_trading.yaml --engine both --end 2024-06-28
 quant-stack dashboard                                   # http://127.0.0.1:8501
 ```
@@ -115,6 +115,29 @@ The sweep runs the same reference backtest on 200 different random price histori
 *Return difference per seed (strategy minus benchmark), as a fraction: -0.1 means the strategy finished 10 points behind. The distant bars are mostly kill-switch timing: seeds where only one side tripped, or where both tripped months apart. In `aggressive_growth` the one far bar is such a seed. In `paper_trading`, 6 of the 7 seeds more than 10 points from zero are of this kind, and the seventh is a high-return path where neither tripped.*
 
 These are results on synthetic random prices. They say nothing about real markets.
+
+## Real-data windows (historical prices)
+
+```bash
+quant-stack windows --preset paper_trading --provider yfinance --start 2010-07-01 --end 2026-11-18 --step-months 6
+quant-stack windows --preset paper_trading --provider yfinance --start 2010-07-01 --end 2026-11-18 --step-months 6 --max-drawdown 0.30
+```
+
+The strategy and the equal-weight benchmark are run over rolling windows of real Yahoo Finance history (the `paper_trading` tickers; one download, a fresh run per window, 5 bps fees). Windows overlap, so they are not independent: only the greedy set of non-overlapping windows (7 of 27) is summarized, and no p-values are reported. Run on 2026-11-19 with data through 2026-11-18; Yahoo's adjusted history can be revised, so later runs may differ slightly.
+
+| | 10% kill-switch (preset) | 30% kill-switch (`--max-drawdown 0.30`) |
+|---|---|---|
+| Windows where the strategy hit the kill-switch | 27 of 27 | 8 of 27 |
+| Strategy beat benchmark (7 non-overlapping windows) | 5 of 7 | 4 of 7 |
+| Mean difference (strategy minus benchmark) | -0.19% | +1.18% |
+| Median difference | +0.13% | +0.23% |
+| Range across the 7 windows | -5.96% to +2.36% | -5.59% to +8.00% |
+
+- No consistent edge. The mean difference changes sign with the kill-switch setting, the medians are close to zero, and single windows differ by several points in both directions. With 7 windows this does not support a claim that the optimizer helps.
+- The 10% latched kill-switch dominates that run. It fired in all 27 windows, for the strategy and the benchmark, and the strategy spent a median of about 80% of its evaluation period in cash, so most of what it measures is when each portfolio went to cash. The 30% run is the better test of the optimizer itself.
+- Absolute returns are inflated by survivorship bias: the tickers are today's well-known large caps, several of them among the biggest winners of 2010 to 2026. Compare the strategy with the benchmark, not either with the market.
+
+This is a historical backtest with close-to-close fills and a proportional fee. It is not evidence of a profitable strategy.
 
 ## How the engines are verified
 
