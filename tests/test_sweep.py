@@ -3,7 +3,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from quant_stack.backtest.sweep import SweepSummary, run_seed_sweep, summarize_sweep
+from quant_stack.backtest.sweep import (
+    KillSwitchOutcomeSummary,
+    SweepSummary,
+    run_seed_sweep,
+    summarize_sweep,
+)
 from quant_stack.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,6 +95,56 @@ def test_summarize_sweep_breaks_down_kill_switch_outcomes():
     assert summary.mean_extra_fees == pytest.approx(4.0)
 
 
+def test_summarize_sweep_breaks_down_only_benchmark_tripped_outcomes():
+    results = pd.DataFrame(
+        {
+            "return_difference": [0.1, 0.3, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2],
+            "strategy_kill_switch_tripped": [
+                False,
+                False,
+                True,
+                True,
+                False,
+                False,
+                True,
+                True,
+            ],
+            "benchmark_kill_switch_tripped": [
+                False,
+                False,
+                False,
+                False,
+                True,
+                True,
+                True,
+                True,
+            ],
+            "strategy_fees_paid": [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0],
+            "benchmark_fees_paid": [1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 4.0, 4.0],
+        }
+    )
+
+    summary = summarize_sweep(results)
+
+    assert summary.neither_tripped.count == 2
+    assert summary.neither_tripped.mean == pytest.approx(0.2)
+    assert summary.neither_tripped.median == pytest.approx(0.2)
+    assert summary.neither_tripped.std == pytest.approx(0.1414213562373095)
+    assert summary.only_strategy_tripped.count == 2
+    assert summary.only_strategy_tripped.mean == pytest.approx(0.3)
+    assert summary.only_strategy_tripped.median == pytest.approx(0.3)
+    assert summary.only_strategy_tripped.std == pytest.approx(0.1414213562373095)
+    assert summary.only_benchmark_tripped.count == 2
+    assert summary.only_benchmark_tripped.mean == pytest.approx(0.7)
+    assert summary.only_benchmark_tripped.median == pytest.approx(0.7)
+    assert summary.only_benchmark_tripped.std == pytest.approx(0.1414213562373095)
+    assert summary.both_tripped.count == 2
+    assert summary.both_tripped.mean == pytest.approx(1.1)
+    assert summary.both_tripped.median == pytest.approx(1.1)
+    assert summary.both_tripped.std == pytest.approx(0.1414213562373095)
+    assert summary.mean_extra_fees == pytest.approx(7.0)
+
+
 def test_sweep_cli_uses_fixed_default_end_date_and_preset_name(monkeypatch, tmp_path, capsys):
     call = {}
 
@@ -97,7 +152,15 @@ def test_sweep_cli_uses_fixed_default_end_date_and_preset_name(monkeypatch, tmp_
         call.update(
             seed_count=seed_count, end_date=end_date, workers=workers, output_name=output_name
         )
-        summary = SweepSummary(0.0, 0.0, 0.0, 0.0, (0.0, 0.0), 0.0)
+        summary = SweepSummary(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            (0.0, 0.0),
+            0.0,
+            only_benchmark_tripped=KillSwitchOutcomeSummary(2, 0.5, 0.5, 0.1414213562373095),
+        )
         return (
             pd.DataFrame({"seed": [0]}),
             summary,
@@ -120,5 +183,5 @@ def test_sweep_cli_uses_fixed_default_end_date_and_preset_name(monkeypatch, tmp_
     assert "vectorized reference simulator" in output
     assert "Neither tripped (n=0)" in output
     assert "Only strategy tripped (n=0)" in output
-    assert "Only benchmark tripped (n=0)" in output
+    assert "Only benchmark tripped (n=2): mean 50.00%, median 50.00%, std 14.14%" in output
     assert "Both tripped (n=0)" in output
