@@ -41,6 +41,17 @@ def test_engines_agree_when_kill_switch_trips(cfg, prices, schedule):
     assert all(v == 0 for v in nt.final_shares.values())
 
 
+def test_engines_agree_when_kill_switch_rearms(cfg, prices, schedule):
+    ex = cfg.execution.model_copy(deep=True)
+    ex.risk_limits.max_drawdown_pct = 0.05
+    ex.risk_limits.rearm_after_bars = 20
+    sim, nt = _compare(prices, schedule, ex)
+    assert sim.halts
+    assert sim.rearms
+    assert nt.halts == sim.halts
+    assert nt.rearms == sim.rearms
+
+
 def test_engine_can_run_twice_in_one_process(cfg, prices, schedule):
     ex = cfg.execution
     a = run_nautilus_backtest(prices, schedule, ex)

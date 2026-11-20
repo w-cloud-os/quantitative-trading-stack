@@ -23,6 +23,8 @@ class SimResult:
     traded_notional: float = 0.0
     halted_on: pd.Timestamp | None = None
     final_shares: dict[str, int] = field(default_factory=dict)
+    halts: list[pd.Timestamp] = field(default_factory=list)
+    rearms: list[pd.Timestamp] = field(default_factory=list)
 
 
 def prepare_prices(prices: pd.DataFrame) -> pd.DataFrame:
@@ -54,6 +56,7 @@ def simulate(prices: pd.DataFrame, schedule: list[Decision], cfg: ExecutionConfi
     monitor = DrawdownMonitor(cfg.risk_limits.max_drawdown_pct)
     res = SimResult(equity=pd.Series(dtype=float))
     equity_log: list[float] = []
+    halt_index: int | None = None
 
     def trade(date: pd.Timestamp, ticker: str, delta: int, px: float) -> None:
         nonlocal cash
@@ -83,9 +86,17 @@ def simulate(prices: pd.DataFrame, schedule: list[Decision], cfg: ExecutionConfi
         equity = cash + sum(shares[t] * float(row[t]) for t in tickers)
         equity_log.append(equity)
         if monitor.tripped:
-            continue
+            rearm_after_bars = cfg.risk_limits.rearm_after_bars
+            if rearm_after_bars is None or halt_index is None or k < halt_index + rearm_after_bars:
+                continue
+            monitor.rearm(equity)
+            res.rearms.append(date)
+            halt_index = None
         if monitor.update(equity):
-            res.halted_on = date
+            if res.halted_on is None:
+                res.halted_on = date
+            res.halts.append(date)
+            halt_index = k
             for t in tickers:
                 trade(date, t, -shares[t], float(row[t]))
             continue

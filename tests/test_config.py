@@ -52,3 +52,15 @@ def test_cash_buffer_must_cover_fees():
     raw["execution"]["cash_buffer"] = 0.01
     with pytest.raises(ValidationError):
         StackConfig.model_validate(raw)
+
+
+def test_rearm_after_bars_defaults_to_none_and_must_be_positive():
+    raw = _raw()
+    assert StackConfig.model_validate(raw).execution.risk_limits.rearm_after_bars is None
+
+    raw["execution"]["risk_limits"]["rearm_after_bars"] = 1
+    assert StackConfig.model_validate(raw).execution.risk_limits.rearm_after_bars == 1
+
+    raw["execution"]["risk_limits"]["rearm_after_bars"] = 0
+    with pytest.raises(ValidationError):
+        StackConfig.model_validate(raw)
