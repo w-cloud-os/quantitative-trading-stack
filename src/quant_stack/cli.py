@@ -111,6 +111,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     windows.add_argument("--step-months", type=_positive_int, default=6)
     windows.add_argument("--max-drawdown", type=_drawdown)
+    windows.add_argument(
+        "--rearm-after-bars",
+        type=_positive_int,
+        default=None,
+        help="bars to wait before re-arming the kill switch (default: latched)",
+    )
     dash = sub.add_parser("dashboard", help="launch the Streamlit research dashboard")
     dash.add_argument("--host", default="127.0.0.1")
     dash.add_argument("--port", type=int, default=8501)
@@ -202,6 +208,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Evaluation: historical data ({args.provider}), not synthetic")
         print(f"Preset: {args.preset} | effective max_drawdown_pct: {effective_drawdown:.2%}")
+        rearm_label = (
+            str(args.rearm_after_bars) if args.rearm_after_bars is not None else "latched (None)"
+        )
+        print(f"Effective rearm_after_bars: {rearm_label}")
         print("Each window is a fresh run; the kill-switch re-arms for every window.")
         try:
             results, summary, csv_path, skipped = run_window_evaluation(
@@ -212,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.step_months,
                 args.max_drawdown,
                 output_name=args.preset,
+                rearm_after_bars=args.rearm_after_bars,
             )
         except NoSuccessfulWindowsError as exc:
             for window_end, reason in exc.skipped:
@@ -241,7 +252,9 @@ def main(argv: list[str] | None = None) -> int:
             "benchmark_total_return",
             "return_difference",
             "strategy_kill_switch_date",
+            "strategy_halt_count",
             "benchmark_kill_switch_date",
+            "benchmark_halt_count",
             "strategy_fraction_in_cash_after_halt",
             "independent",
         ]

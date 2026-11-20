@@ -6,11 +6,14 @@ import pandas as pd
 import pytest
 import yaml
 
-from quant_stack.backtest.runner import run_reference_backtest
+from quant_stack.backtest.runner import BacktestReport, run_reference_backtest
+from quant_stack.backtest.simulate import SimResult
 from quant_stack.backtest.windows import (
     InMemoryProvider,
     _cash_fraction,
     _mark_independent,
+    _summarize,
+    _window_row,
     run_window_evaluation,
 )
 from quant_stack.cli import main
@@ -26,6 +29,7 @@ WINDOW_COLUMNS = {
     "strategy_sharpe",
     "strategy_max_drawdown",
     "strategy_kill_switch_date",
+    "strategy_halt_count",
     "strategy_fraction_in_cash_after_halt",
     "strategy_fees_paid",
     "benchmark_total_return",
@@ -33,6 +37,7 @@ WINDOW_COLUMNS = {
     "benchmark_sharpe",
     "benchmark_max_drawdown",
     "benchmark_kill_switch_date",
+    "benchmark_halt_count",
     "benchmark_fraction_in_cash_after_halt",
     "benchmark_fees_paid",
     "return_difference",
@@ -84,6 +89,7 @@ def test_window_evaluation_marks_non_overlapping_windows_and_matches_direct_run(
     cfg, tmp_path: Path
 ):
     short = _short_config(cfg)
+    original_rearm = short.execution.risk_limits.rearm_after_bars
     history = _history(short)
     provider = InMemoryProvider(history, "synthetic")
 
@@ -103,6 +109,7 @@ def test_window_evaluation_marks_non_overlapping_windows_and_matches_direct_run(
         )
     assert csv_path.is_file()
     assert csv_path.name == "windows_paper_trading_synthetic.csv"
+    assert short.execution.risk_limits.rearm_after_bars == original_rearm
     selected = results.iloc[-1]
     direct = run_reference_backtest(short, provider, selected["window_end"])
     assert selected["evaluation_start"] == direct.evaluation_start.date().isoformat()
@@ -142,8 +149,109 @@ def test_window_evaluation_halts_and_summarizes_only_independent_windows(cfg, tm
     fractions = results["strategy_fraction_in_cash_after_halt"]
     assert fractions.between(0, 1, inclusive="neither").any()
     independent = results.loc[results["independent"]]
-    assert summary.strategy_halts == independent["strategy_kill_switch_date"].ne("").sum()
-    assert summary.strategy_halts < results["strategy_kill_switch_date"].ne("").sum()
+    assert summary.strategy_halts == int(independent["strategy_halt_count"].sum())
+    assert summary.strategy_halts <= results["strategy_halt_count"].sum()
+
+
+def test_window_evaluation_rearm_override_is_copied_and_counts_all_halts(
+    cfg, tmp_path: Path, monkeypatch
+):
+    short = _short_config(cfg)
+    short_original_rearm = short.execution.risk_limits.rearm_after_bars
+    short_original_drawdown = short.execution.risk_limits.max_drawdown_pct
+    provider = InMemoryProvider(_history(short), "synthetic")
+    import quant_stack.backtest.windows as windows
+
+    seen_configs = []
+    original_run = run_reference_backtest
+
+    def capture_run(run_cfg, in_memory, end):
+        seen_configs.append(run_cfg)
+        return original_run(run_cfg, in_memory, end)
+
+    monkeypatch.setattr(windows, "run_reference_backtest", capture_run)
+    results, summary, _, skipped = run_window_evaluation(
+        short,
+        provider,
+        START,
+        END,
+        step_months=24,
+        max_drawdown=0.25,
+        rearm_after_bars=3,
+        results_dir=tmp_path,
+    )
+
+    assert not skipped
+    assert seen_configs
+    assert all(config.execution.risk_limits.rearm_after_bars == 3 for config in seen_configs)
+    assert all(config.execution.risk_limits.max_drawdown_pct == 0.25 for config in seen_configs)
+    assert short.execution.risk_limits.rearm_after_bars == short_original_rearm
+    assert short.execution.risk_limits.max_drawdown_pct == short_original_drawdown
+    assert "strategy_halt_count" in results
+    assert "benchmark_halt_count" in results
+    independent = results.loc[results["independent"]]
+    assert summary.strategy_halts == int(independent["strategy_halt_count"].sum())
+    assert summary.benchmark_halts == int(independent["benchmark_halt_count"].sum())
+
+
+def test_window_row_and_summary_count_multiple_halts():
+    idx = pd.bdate_range("2023-01-01", periods=20)
+    equity = pd.Series(100.0, index=idx)
+    strategy = SimResult(
+        equity=equity,
+        fills=[{"date": idx[0]}],
+        halted_on=idx[5],
+        halts=[idx[5], idx[12]],
+        rearms=[idx[8]],
+    )
+    benchmark = SimResult(
+        equity=equity,
+        fills=[{"date": idx[0]}],
+        halted_on=idx[7],
+        halts=[idx[7], idx[14]],
+        rearms=[idx[10]],
+    )
+    report = BacktestReport(
+        prices=equity.to_frame("A"),
+        schedule=[],
+        strategy=strategy,
+        benchmark=benchmark,
+        strategy_metrics={
+            "total_return": 0.1,
+            "cagr": 0.1,
+            "sharpe": 1.0,
+            "max_drawdown": 0.1,
+        },
+        benchmark_metrics={
+            "total_return": 0.05,
+            "cagr": 0.05,
+            "sharpe": 0.5,
+            "max_drawdown": 0.2,
+        },
+        provider="synthetic",
+        evaluation_start=idx[0],
+    )
+
+    row = _window_row(report, idx[-1])
+    assert row["strategy_halt_count"] == 2
+    assert row["benchmark_halt_count"] == 2
+    results = pd.DataFrame([{"independent": True, **row}])
+    summary = _summarize(results)
+    assert summary.strategy_halts == 2
+    assert summary.benchmark_halts == 2
+
+
+@pytest.mark.parametrize("rearm_after_bars", [0, -1, 1.5, True])
+def test_window_evaluation_rejects_invalid_rearm(cfg, tmp_path: Path, rearm_after_bars):
+    with pytest.raises(ValueError, match="rearm_after_bars must be at least 1"):
+        run_window_evaluation(
+            cfg,
+            InMemoryProvider(_history(cfg), "synthetic"),
+            START,
+            END,
+            rearm_after_bars=rearm_after_bars,
+            results_dir=tmp_path,
+        )
 
 
 def test_window_evaluation_skips_a_failed_window(cfg, tmp_path: Path, monkeypatch):
@@ -173,6 +281,7 @@ def test_windows_cli_csv_and_drawdown_override_do_not_mutate_preset(
 ):
     short = _short_config(cfg)
     original_drawdown = short.execution.risk_limits.max_drawdown_pct
+    original_rearm = short.execution.risk_limits.rearm_after_bars
     history = _history(short)
     csv_path = tmp_path / "history.csv"
     history.to_csv(csv_path)
@@ -212,6 +321,8 @@ def test_windows_cli_csv_and_drawdown_override_do_not_mutate_preset(
                 "24",
                 "--max-drawdown",
                 "0.30",
+                "--rearm-after-bars",
+                "3",
             ]
         )
         == 0
@@ -220,6 +331,7 @@ def test_windows_cli_csv_and_drawdown_override_do_not_mutate_preset(
     output = capsys.readouterr().out
     assert "historical data (csv), not synthetic" in output
     assert "effective max_drawdown_pct: 30.00%" in output
+    assert "Effective rearm_after_bars: 3" in output
     assert "Each window is a fresh run" in output
     table_header = next(line for line in output.splitlines() if "window_end" in line)
     assert table_header.split() == [
@@ -229,14 +341,18 @@ def test_windows_cli_csv_and_drawdown_override_do_not_mutate_preset(
         "benchmark_total_return",
         "return_difference",
         "strategy_kill_switch_date",
+        "strategy_halt_count",
         "benchmark_kill_switch_date",
+        "benchmark_halt_count",
         "strategy_fraction_in_cash_after_halt",
         "independent",
     ]
     assert "windows_paper_trading_csv_dd30.csv" in output
     assert (tmp_path / "results" / "windows_paper_trading_csv_dd30.csv").is_file()
     assert short.execution.risk_limits.max_drawdown_pct == original_drawdown
+    assert short.execution.risk_limits.rearm_after_bars == original_rearm
     assert loaded_configs[0].execution.risk_limits.max_drawdown_pct == original_drawdown
+    assert loaded_configs[0].execution.risk_limits.rearm_after_bars == original_rearm
 
 
 @pytest.mark.parametrize(
@@ -275,6 +391,18 @@ def test_windows_cli_csv_and_drawdown_override_do_not_mutate_preset(
             "2023-01-02",
             "--max-drawdown",
             "1.5",
+        ],
+        [
+            "--provider",
+            "csv",
+            "--csv-path",
+            "history.csv",
+            "--start",
+            "2023-01-01",
+            "--end",
+            "2023-01-02",
+            "--rearm-after-bars",
+            "0",
         ],
         ["--provider", "csv", "--start", "2023-01-01", "--end", "2023-01-02"],
         [
