@@ -27,6 +27,14 @@ class DrawdownMonitor:
             self.tripped = True
         return self.tripped
 
+    def rearm(self, equity: float) -> None:
+        """Reset the monitor's high-water mark to a valid equity value."""
+        if not math.isfinite(equity) or equity <= 0:
+            raise ValueError("equity must be finite and positive")
+        self.peak = equity
+        self.tripped = False
+        self.drawdown = 0.0
+
 
 def slice_quantity(quantity: int, price: float, max_order_value: float) -> list[int]:
     """Split an order into child orders that each respect ``max_order_value``."""

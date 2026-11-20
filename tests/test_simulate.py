@@ -61,6 +61,80 @@ def test_kill_switch_flattens_and_stays_flat(cfg):
     assert all(f["date"] <= idx[20] for f in res.fills)  # no trades after the halt
 
 
+def test_kill_switch_rearms_then_can_trip_again(cfg):
+    idx = pd.bdate_range("2023-01-02", periods=15)
+    px = pd.DataFrame({"A": 100.0}, index=idx)
+    px.loc[idx[5] : idx[9], "A"] = 80.0
+    px.loc[idx[12] :, "A"] = 50.0
+    ex = cfg.execution.model_copy(deep=True)
+    ex.initial_capital = 10_000.0
+    ex.execution_lag_bars = 0
+    ex.cash_buffer = 0.0
+    ex.risk_limits.max_drawdown_pct = 0.10
+    ex.risk_limits.rearm_after_bars = 3
+    schedule = [
+        _decision(px, 0, {"A": 1.0}),
+        _decision(px, 10, {"A": 1.0}),
+    ]
+
+    res = simulate(px, schedule, ex)
+
+    assert res.halts == [idx[5], idx[12]]
+    assert res.halted_on == idx[5]
+    assert res.rearms == [idx[8]]
+    assert any(fill["date"] == idx[10] for fill in res.fills)
+    assert all(fill["date"] <= idx[5] or fill["date"] >= idx[10] for fill in res.fills)
+    assert all(value == 0 for value in res.final_shares.values())
+
+
+def test_scheduled_rebalance_executes_on_rearm_bar(cfg):
+    idx = pd.bdate_range("2023-01-02", periods=12)
+    px = pd.DataFrame({"A": 100.0}, index=idx)
+    px.loc[idx[3] : idx[5], "A"] = 80.0
+    ex = cfg.execution.model_copy(deep=True)
+    ex.initial_capital = 10_000.0
+    ex.execution_lag_bars = 0
+    ex.cash_buffer = 0.0
+    ex.risk_limits.max_drawdown_pct = 0.10
+    ex.risk_limits.rearm_after_bars = 3
+    schedule = [
+        _decision(px, 0, {"A": 1.0}),
+        _decision(px, 5, {"A": 1.0}),
+        _decision(px, 6, {"A": 1.0}),
+    ]
+
+    res = simulate(px, schedule, ex)
+
+    assert res.halts == [idx[3]]
+    assert res.rearms == [idx[6]]
+    assert any(fill["date"] == idx[6] and fill["side"] == "BUY" for fill in res.fills)
+    assert all(fill["date"] not in (idx[4], idx[5]) for fill in res.fills)
+
+
+def test_kill_switch_without_rearm_remains_latched(cfg):
+    idx = pd.bdate_range("2023-01-02", periods=20)
+    px = pd.DataFrame({"A": 100.0}, index=idx)
+    px.loc[idx[5] :, "A"] = 80.0
+    ex = cfg.execution.model_copy(deep=True)
+    ex.initial_capital = 10_000.0
+    ex.execution_lag_bars = 0
+    ex.cash_buffer = 0.0
+    ex.risk_limits.max_drawdown_pct = 0.10
+    ex.risk_limits.rearm_after_bars = None
+    schedule = [
+        _decision(px, 0, {"A": 1.0}),
+        _decision(px, 10, {"A": 1.0}),
+    ]
+
+    res = simulate(px, schedule, ex)
+
+    assert res.halts == [idx[5]]
+    assert res.halted_on == idx[5]
+    assert res.rearms == []
+    assert all(fill["date"] <= idx[5] for fill in res.fills)
+    assert all(value == 0 for value in res.final_shares.values())
+
+
 def test_benchmark_schedule_is_equal_weight(cfg, prices):
     sched = build_schedule(prices, cfg)
     bench = benchmark_schedule(sched)

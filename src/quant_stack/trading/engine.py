@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 import pandas as pd
@@ -29,6 +29,8 @@ class NautilusResult:
     fills: pd.DataFrame
     halted_on: pd.Timestamp | None
     final_shares: dict[str, int]
+    halts: list[pd.Timestamp] = field(default_factory=list)
+    rearms: list[pd.Timestamp] = field(default_factory=list)
 
 
 def _make_instrument(ticker: str, venue: Venue, fee_rate: float) -> Equity:
@@ -89,6 +91,7 @@ def run_nautilus_backtest(
                 schedule=exec_schedule,
                 max_drawdown_pct=cfg.risk_limits.max_drawdown_pct,
                 max_order_value=cfg.risk_limits.max_order_value,
+                rearm_after_bars=cfg.risk_limits.rearm_after_bars,
                 max_position_leverage=cfg.risk_limits.max_position_leverage,
                 cash_buffer=cfg.cash_buffer,
             )
@@ -102,6 +105,8 @@ def run_nautilus_backtest(
         )
         fills = engine.trader.generate_fills_report()
         halted = date_by_ts.get(strategy.halted_ts) if strategy.halted_ts is not None else None
-        return NautilusResult(equity, fills, halted, dict(strategy.final_shares))
+        halts = [date_by_ts[ts] for ts in strategy.halts_ts]
+        rearms = [date_by_ts[ts] for ts in strategy.rearms_ts]
+        return NautilusResult(equity, fills, halted, dict(strategy.final_shares), halts, rearms)
     finally:
         engine.dispose()

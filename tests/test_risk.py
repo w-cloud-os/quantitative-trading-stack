@@ -23,6 +23,20 @@ def test_monitor_tracks_high_water_mark():
     assert m.update(107)  # -10.8%
 
 
+def test_monitor_rearm_resets_peak_and_can_trip_again():
+    m = DrawdownMonitor(0.10)
+    assert not m.update(100)
+    assert m.update(80)
+
+    m.rearm(80)
+
+    assert m.peak == 80
+    assert not m.tripped
+    assert m.drawdown == 0
+    assert not m.update(80)
+    assert m.update(71)
+
+
 @pytest.mark.parametrize("bad", [0.0, 1.0, -0.1])
 def test_monitor_rejects_bad_limits(bad):
     with pytest.raises(ValueError):
@@ -32,6 +46,12 @@ def test_monitor_rejects_bad_limits(bad):
 @pytest.mark.parametrize("equity", [0.0, -5.0, math.nan, math.inf])
 def test_monitor_trips_on_corrupt_equity(equity):
     assert DrawdownMonitor(0.1).update(equity)
+
+
+@pytest.mark.parametrize("equity", [0.0, -5.0, math.nan, math.inf])
+def test_monitor_rearm_rejects_bad_equity(equity):
+    with pytest.raises(ValueError):
+        DrawdownMonitor(0.1).rearm(equity)
 
 
 def test_slice_quantity_respects_limit_and_sums():

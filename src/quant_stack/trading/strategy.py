@@ -25,6 +25,7 @@ class RebalanceConfig(StrategyConfig, frozen=True):
     schedule: dict[int, dict[str, float]]
     max_drawdown_pct: float
     max_order_value: float
+    rearm_after_bars: int | None = None
     max_position_leverage: float = 1.0
     cash_buffer: float = 0.01
 
@@ -36,10 +37,14 @@ class PortfolioRebalanceStrategy(Strategy):
         self.monitor = DrawdownMonitor(config.max_drawdown_pct)
         self.equity_log: list[tuple[int, float]] = []
         self.halted_ts: int | None = None
+        self.halts_ts: list[int] = []
+        self.rearms_ts: list[int] = []
         self.final_shares: dict[str, int] = {}
         self._last_close: dict[InstrumentId, float] = {}
         self._bar_ts: dict[InstrumentId, int] = {}
         self._venue: Venue | None = None
+        self._day_index = -1
+        self._halt_day_index: int | None = None
 
     def on_start(self) -> None:
         for raw in self.config.instrument_ids:
@@ -61,17 +66,30 @@ class PortfolioRebalanceStrategy(Strategy):
         # Act once per day, after the LAST instrument's bar for this timestamp has arrived.
         if any(self._bar_ts.get(i) != bar.ts_event for i in self.instruments):
             return
+        self._day_index += 1
         equity = self._equity()
         self.equity_log.append((bar.ts_event, equity))
         if self.monitor.tripped:
-            return
+            rearm_after_bars = self.config.rearm_after_bars
+            if (
+                rearm_after_bars is None
+                or self._halt_day_index is None
+                or self._day_index < self._halt_day_index + rearm_after_bars
+            ):
+                return
+            self.monitor.rearm(equity)
+            self.rearms_ts.append(bar.ts_event)
+            self._halt_day_index = None
         if self.monitor.update(equity):
             self.log.error(
                 f"KILL-SWITCH: drawdown {self.monitor.drawdown:.2%} >= "
                 f"{self.config.max_drawdown_pct:.2%}. Flattening and halting."
             )
             self._liquidate()
-            self.halted_ts = bar.ts_event
+            if self.halted_ts is None:
+                self.halted_ts = bar.ts_event
+            self.halts_ts.append(bar.ts_event)
+            self._halt_day_index = self._day_index
             return
         weights = self.config.schedule.get(bar.ts_event)
         if weights:

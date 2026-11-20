@@ -57,6 +57,7 @@ class RiskLimits(_Strict):
     max_drawdown_pct: float = Field(default=0.10, gt=0, lt=1)
     max_order_value: float = Field(default=250_000.0, gt=0)
     max_position_leverage: float = Field(default=1.0, gt=0, le=1.0)  # long-only, no leverage
+    rearm_after_bars: int | None = Field(default=None, ge=1)
 
 
 class ExecutionConfig(_Strict):
