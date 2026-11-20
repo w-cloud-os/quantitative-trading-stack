@@ -71,6 +71,8 @@ def _window_row(report: BacktestReport, window_end: pd.Timestamp) -> dict[str, o
         raise ValueError("no first trade")
     strategy_halt = report.strategy.halted_on
     benchmark_halt = report.benchmark.halted_on
+    strategy_halt_count = len(report.strategy.halts)
+    benchmark_halt_count = len(report.benchmark.halts)
     strategy_return = report.strategy_metrics["total_return"]
     benchmark_return = report.benchmark_metrics["total_return"]
     return {
@@ -81,6 +83,7 @@ def _window_row(report: BacktestReport, window_end: pd.Timestamp) -> dict[str, o
         "strategy_sharpe": report.strategy_metrics["sharpe"],
         "strategy_max_drawdown": report.strategy_metrics["max_drawdown"],
         "strategy_kill_switch_date": _halt_date(report.strategy),
+        "strategy_halt_count": strategy_halt_count,
         "strategy_fraction_in_cash_after_halt": _cash_fraction(
             report.strategy.equity, report.evaluation_start, strategy_halt
         ),
@@ -90,6 +93,7 @@ def _window_row(report: BacktestReport, window_end: pd.Timestamp) -> dict[str, o
         "benchmark_sharpe": report.benchmark_metrics["sharpe"],
         "benchmark_max_drawdown": report.benchmark_metrics["max_drawdown"],
         "benchmark_kill_switch_date": _halt_date(report.benchmark),
+        "benchmark_halt_count": benchmark_halt_count,
         "benchmark_fraction_in_cash_after_halt": _cash_fraction(
             report.benchmark.equity, report.evaluation_start, benchmark_halt
         ),
@@ -120,8 +124,8 @@ def _summarize(results: pd.DataFrame) -> WindowsSummary:
         strategy_wins=int((selected["return_difference"] > 0).sum()),
         mean_difference=float(selected["return_difference"].mean()),
         median_difference=float(selected["return_difference"].median()),
-        strategy_halts=int(selected["strategy_kill_switch_date"].ne("").sum()),
-        benchmark_halts=int(selected["benchmark_kill_switch_date"].ne("").sum()),
+        strategy_halts=int(selected["strategy_halt_count"].sum()),
+        benchmark_halts=int(selected["benchmark_halt_count"].sum()),
     )
 
 
@@ -134,6 +138,7 @@ def run_window_evaluation(
     max_drawdown: float | None = None,
     results_dir: str | Path = "results",
     output_name: str | None = None,
+    rearm_after_bars: int | None = None,
 ) -> tuple[pd.DataFrame, WindowsSummary, Path, list[tuple[str, str]]]:
     """Run eligible windows from one full-range download and write the per-window CSV."""
     start_ts = pd.Timestamp(start).normalize()
@@ -142,16 +147,25 @@ def run_window_evaluation(
         raise ValueError("start must be earlier than end")
     if step_months < 1:
         raise ValueError("step_months must be at least 1")
+    if rearm_after_bars is not None and (
+        isinstance(rearm_after_bars, bool)
+        or not isinstance(rearm_after_bars, int)
+        or rearm_after_bars < 1
+    ):
+        raise ValueError("rearm_after_bars must be at least 1")
     preset_name = output_name or cfg.preset_name
     if not re.fullmatch(r"[A-Za-z0-9_-]+", preset_name):
         raise ValueError("preset_name must contain only letters, numbers, underscores, and hyphens")
 
     run_cfg = cfg
+    if max_drawdown is not None or rearm_after_bars is not None:
+        run_cfg = cfg.model_copy(deep=True)
     if max_drawdown is not None:
         if not 0 < max_drawdown < 1:
             raise ValueError("max_drawdown must be strictly between 0 and 1")
-        run_cfg = cfg.model_copy(deep=True)
         run_cfg.execution.risk_limits.max_drawdown_pct = max_drawdown
+    if rearm_after_bars is not None:
+        run_cfg.execution.risk_limits.rearm_after_bars = rearm_after_bars
 
     download_end = (end_ts + pd.Timedelta(days=1)).date().isoformat()
     prices = provider.fetch(sorted(run_cfg.data.tickers), start_ts.date().isoformat(), download_end)
