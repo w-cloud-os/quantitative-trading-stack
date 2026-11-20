@@ -44,4 +44,9 @@ select = ["E", "F", "I", "UP", "B"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = ["nautilus: slower tests that run the NautilusTrader engine"]
-filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning", "ignore:.*utcnow.*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+    "ignore:.*utcnow.*",
+    "ignore:invalid value encountered in scalar divide:RuntimeWarning:skfolio.moments.covariance._denoise_covariance",
+]
