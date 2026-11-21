@@ -23,7 +23,7 @@ forecast layer and hard risk limits.
 | Portfolio | Max-ratio mean-risk optimization (CVaR / CDaR / variance), denoised covariance, shrunk mean, sector limits, per-asset turnover cap, fallback chain. | `optimization/portfolio.py` |
 | Blend | `w = benchmark + confidence * (optimized - benchmark)`. Confident: tilt hard. Guessing: snap back to equal weight. | `optimization/blend.py` |
 | Execution | Rebalances to target weights as whole-share market orders; orders are sliced to respect `max_order_value`. | `trading/strategy.py` |
-| Oversight | Drawdown kill-switch: cancel orders, flatten everything, halt (latched). Pure logic lives in `risk.py` and is unit-tested separately. | `risk.py` |
+| Oversight | Drawdown kill-switch: cancel orders, flatten everything, halt (latched by default; optional cool-down re-arm). Pure logic lives in `risk.py` and is unit-tested separately. | `risk.py` |
 
 No LLM is anywhere in the order path.
 
@@ -35,7 +35,7 @@ Requires **Python 3.12+** (NautilusTrader does not support 3.11).
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
-pytest                                                  # 69 tests, includes the engine cross-check
+pytest                                                  # 93 tests, includes the engine cross-check
 quant-stack backtest --config configs/paper_trading.yaml --engine both --end 2024-06-28
 quant-stack dashboard                                   # http://127.0.0.1:8501
 ```
@@ -139,6 +139,30 @@ The strategy and the equal-weight benchmark are run over rolling windows of real
 
 This is a historical backtest with close-to-close fills and a proportional fee. It is not evidence of a profitable strategy.
 
+## Kill-switch re-arm (optional)
+
+By default the drawdown kill-switch latches: after a trip the portfolio stays in cash for the rest of the run. Setting `rearm_after_bars: N` under `execution.risk_limits` in a preset (default `null`, meaning latched) re-arms it N bars after a trip: the high-water mark resets to the current equity and trading resumes at the next scheduled rebalance. The rule is implemented identically in the reference simulator and the NautilusTrader strategy, and the parity test covers it. For the real-data windows command use `--rearm-after-bars N`.
+
+Real-data windows with the `paper_trading` tickers and its 10% limit (27 windows, 7 of them non-overlapping; gap = strategy minus benchmark):
+
+| | Latched | Re-arm after 21 bars | After 63 bars | After 126 bars |
+|---|---|---|---|---|
+| Strategy beat benchmark (7 non-overlapping windows) | 5 | 6 | 5 | 4 |
+| Mean gap | -0.19% | +5.45% | +4.99% | -0.30% |
+| Median gap | +0.13% | +5.22% | +1.26% | +0.22% |
+| Strategy halts in those 7 windows (total) | 7 | 22 | 19 | 14 |
+| Median share of the evaluated period in cash (all 27 windows) | 80% | 13% | 37% | 52% |
+
+What the numbers do and do not show:
+
+- Re-arm trades protection for participation. Time in cash falls, but halts rise from one per window to two or three, and to seven in the window ending 2023-11 (the 2022 bear market) at 21 bars: repeated stop-outs.
+- No cool-down is best. In the window ending 2021-11 (the COVID crash and rebound) the gap was -5.96 points latched, +11.63 at 21 bars, +20.51 at 63 bars and -11.17 at 126 bars: a 32-point swing from the cool-down length alone, which is re-entry timing, not optimizer skill.
+- The +5% means are carried by a few windows. At 21 bars three windows (ending 2013-11, 2019-11, 2021-11) supply most of the total and the other four average about +1.4 points; at 63 bars two windows account for more than the whole total.
+- Placebo check: the same 21-bar windows on 10 random synthetic histories gave mean gaps between -2.29% and +4.10% (average about -0.2%, standard deviation about 2). The real +5.45% is above all ten, but real stocks trip the switch nearly three times as often and these six tickers are survivors, so it is not a perfect control.
+- A second universe, the `conservative_all_weather` ETFs with a 5% limit (4 non-overlapping windows out of 32), shows no such gap: mean gaps of -1.62% latched and -0.27%, -1.36% and +0.61% at 21, 63 and 126 bars.
+
+Read together: there is no demonstrated edge. The re-arm results are hypotheses that a handful of windows, a survivor-biased universe and several tried settings cannot confirm. Reproduce with the commands in the previous section plus `--rearm-after-bars N` (Yahoo's adjusted history can be revised, so digits may shift slightly).
+
 ## How the engines are verified
 
 `simulate()` (a fast reference simulator) and the NautilusTrader strategy implement the same rules:
@@ -187,7 +211,7 @@ tests/                      unit, property, parity and smoke tests
 * **Warm-up is excluded from metrics.** The optimizer needs `train_window` days of history, so the
   first months hold only cash; CAGR/vol/Sharpe are measured from the first trade (same start for the
   benchmark).
-* **Kill-switch latches** for the rest of a run (by design); restart to re-arm. In the seed sweep
+* **Kill-switch latches by default** for the rest of a run; the opt-in `rearm_after_bars` setting re-arms it after a cool-down. In the seed sweep
   this makes a single trip decisive for a seed's result.
 * **Data licensing.** yfinance is research-only. A commercial product needs licensed data.
 * **License note.** This project is BSD-3-Clause; NautilusTrader is LGPL-3.0, so review its terms
