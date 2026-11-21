@@ -212,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
             str(args.rearm_after_bars) if args.rearm_after_bars is not None else "latched (None)"
         )
         print(f"Effective rearm_after_bars: {rearm_label}")
-        print("Each window is a fresh run; the kill-switch re-arms for every window.")
+        print("Each window is a fresh run; kill-switch state resets at the start of every window.")
         try:
             results, summary, csv_path, skipped = run_window_evaluation(
                 cfg,

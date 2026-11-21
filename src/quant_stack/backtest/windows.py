@@ -1,8 +1,8 @@
 """Evaluate real-price backtests across historical windows.
 
-The fraction in cash is evaluation bars strictly after the halt date divided by all evaluation
-bars (0 if there is no halt). Overlap selection is greedy in chronological order from the earliest
-window, so it is deterministic.
+The fraction in cash counts evaluation bars strictly after each halt and strictly before its next
+re-arm (or through the end if there is no later re-arm), divided by all evaluation bars. Overlap
+selection is greedy in chronological order from the earliest window, so it is deterministic.
 """
 
 from __future__ import annotations
@@ -58,19 +58,27 @@ def _halt_date(report_result: SimResult) -> str:
 def _cash_fraction(
     equity: pd.Series,
     evaluation_start: pd.Timestamp,
-    halt: pd.Timestamp | None,
+    halts: list[pd.Timestamp],
+    rearms: list[pd.Timestamp],
 ) -> float:
+    """Return the fraction of evaluation bars after halts and before their next re-arm."""
     evaluation_bars = equity.loc[evaluation_start:].index
-    if halt is None or len(evaluation_bars) == 0:
+    if not halts or len(evaluation_bars) == 0:
         return 0.0
-    return float((evaluation_bars > halt).sum() / len(evaluation_bars))
+    sorted_rearms = sorted(rearms)
+    in_cash = pd.Series(False, index=evaluation_bars)
+    for halt in sorted(halts):
+        next_rearm = next((rearm for rearm in sorted_rearms if rearm > halt), None)
+        mask = evaluation_bars > halt
+        if next_rearm is not None:
+            mask &= evaluation_bars < next_rearm
+        in_cash |= mask
+    return float(in_cash.sum() / len(evaluation_bars))
 
 
 def _window_row(report: BacktestReport, window_end: pd.Timestamp) -> dict[str, object]:
     if not report.strategy.fills:
         raise ValueError("no first trade")
-    strategy_halt = report.strategy.halted_on
-    benchmark_halt = report.benchmark.halted_on
     strategy_halt_count = len(report.strategy.halts)
     benchmark_halt_count = len(report.benchmark.halts)
     strategy_return = report.strategy_metrics["total_return"]
@@ -85,7 +93,10 @@ def _window_row(report: BacktestReport, window_end: pd.Timestamp) -> dict[str, o
         "strategy_kill_switch_date": _halt_date(report.strategy),
         "strategy_halt_count": strategy_halt_count,
         "strategy_fraction_in_cash_after_halt": _cash_fraction(
-            report.strategy.equity, report.evaluation_start, strategy_halt
+            report.strategy.equity,
+            report.evaluation_start,
+            report.strategy.halts,
+            report.strategy.rearms,
         ),
         "strategy_fees_paid": report.strategy.fees,
         "benchmark_total_return": benchmark_return,
@@ -95,7 +106,10 @@ def _window_row(report: BacktestReport, window_end: pd.Timestamp) -> dict[str, o
         "benchmark_kill_switch_date": _halt_date(report.benchmark),
         "benchmark_halt_count": benchmark_halt_count,
         "benchmark_fraction_in_cash_after_halt": _cash_fraction(
-            report.benchmark.equity, report.evaluation_start, benchmark_halt
+            report.benchmark.equity,
+            report.evaluation_start,
+            report.benchmark.halts,
+            report.benchmark.rearms,
         ),
         "benchmark_fees_paid": report.benchmark.fees,
         "return_difference": strategy_return - benchmark_return,
@@ -200,6 +214,8 @@ def run_window_evaluation(
     output_dir = Path(results_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"_dd{max_drawdown * 100:g}" if max_drawdown is not None else ""
+    if rearm_after_bars is not None:
+        suffix += f"_rearm{rearm_after_bars}"
     csv_path = output_dir / f"windows_{preset_name}_{in_memory.name}{suffix}.csv"
     results.to_csv(csv_path, index=False, float_format="%.12g", lineterminator="\n")
     return results, summary, csv_path, skipped
