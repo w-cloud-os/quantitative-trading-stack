@@ -80,9 +80,30 @@ def test_cash_fraction_counts_bars_strictly_after_halt():
     )
     evaluation_start = equity.index[0]
 
-    assert _cash_fraction(equity, evaluation_start, equity.index[3]) == pytest.approx(0.6)
-    assert _cash_fraction(equity, evaluation_start, None) == 0.0
-    assert _cash_fraction(equity, evaluation_start, equity.index[-1]) == 0.0
+    assert _cash_fraction(equity, evaluation_start, [equity.index[3]], []) == pytest.approx(0.6)
+    assert _cash_fraction(equity, evaluation_start, [], []) == 0.0
+    assert _cash_fraction(equity, evaluation_start, [equity.index[-1]], []) == 0.0
+
+
+def test_cash_fraction_counts_bars_until_matching_rearm():
+    equity = pd.Series(
+        range(20), index=pd.date_range("2023-01-02", periods=20, freq="D"), dtype=float
+    )
+    halts = [equity.index[5], equity.index[12]]
+    rearms = [equity.index[8]]
+
+    assert _cash_fraction(equity, equity.index[0], halts, rearms) == pytest.approx(9 / 20)
+    assert _cash_fraction(equity, equity.index[6], halts, rearms) == pytest.approx(9 / 14)
+
+
+def test_cash_fraction_counts_bars_strictly_between_halt_and_last_bar_rearm():
+    equity = pd.Series(
+        range(20), index=pd.date_range("2023-01-02", periods=20, freq="D"), dtype=float
+    )
+
+    assert _cash_fraction(
+        equity, equity.index[0], [equity.index[5]], [equity.index[-1]]
+    ) == pytest.approx(13 / 20)
 
 
 def test_window_evaluation_marks_non_overlapping_windows_and_matches_direct_run(
@@ -121,6 +142,39 @@ def test_window_evaluation_marks_non_overlapping_windows_and_matches_direct_run(
     )
     assert selected["strategy_fees_paid"] == pytest.approx(direct.strategy.fees)
     assert selected["benchmark_fees_paid"] == pytest.approx(direct.benchmark.fees)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_name"),
+    [
+        ({}, "windows_paper_trading_synthetic.csv"),
+        ({"max_drawdown": 0.30}, "windows_paper_trading_synthetic_dd30.csv"),
+        ({"rearm_after_bars": 63}, "windows_paper_trading_synthetic_rearm63.csv"),
+        (
+            {"max_drawdown": 0.30, "rearm_after_bars": 63},
+            "windows_paper_trading_synthetic_dd30_rearm63.csv",
+        ),
+    ],
+)
+def test_window_evaluation_filename_includes_overrides(
+    cfg, tmp_path: Path, overrides: dict[str, float | int], expected_name: str
+):
+    short = _short_config(cfg)
+    history = SyntheticProvider(31).fetch(short.data.tickers, "2022-01-01", "2022-09-01")
+
+    _, _, csv_path, skipped = run_window_evaluation(
+        short,
+        InMemoryProvider(history, "synthetic"),
+        "2022-01-03",
+        "2022-08-31",
+        step_months=24,
+        results_dir=tmp_path,
+        **overrides,
+    )
+
+    assert not skipped
+    assert csv_path.name == expected_name
+    assert csv_path.is_file()
 
 
 def test_window_evaluation_halts_and_summarizes_only_independent_windows(cfg, tmp_path: Path):
@@ -347,8 +401,8 @@ def test_windows_cli_csv_and_drawdown_override_do_not_mutate_preset(
         "strategy_fraction_in_cash_after_halt",
         "independent",
     ]
-    assert "windows_paper_trading_csv_dd30.csv" in output
-    assert (tmp_path / "results" / "windows_paper_trading_csv_dd30.csv").is_file()
+    assert "windows_paper_trading_csv_dd30_rearm3.csv" in output
+    assert (tmp_path / "results" / "windows_paper_trading_csv_dd30_rearm3.csv").is_file()
     assert short.execution.risk_limits.max_drawdown_pct == original_drawdown
     assert short.execution.risk_limits.rearm_after_bars == original_rearm
     assert loaded_configs[0].execution.risk_limits.max_drawdown_pct == original_drawdown
