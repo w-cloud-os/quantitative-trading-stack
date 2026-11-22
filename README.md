@@ -54,6 +54,8 @@ Kill-switch: TRIPPED on 2024-04-09
 Nautilus: final equity $1,193,340.32 | fills 144 | max |diff| vs reference simulator $0.03
 ```
 
+You may also see a harmless skfolio `RuntimeWarning` (a 0/0 in covariance denoising whose result is discarded) and, with `--engine both`, an `[ERROR]` line from NautilusTrader reporting the kill-switch trip. Both are expected.
+
 Real prices: `pip install -e ".[yfinance]"` then `--provider yfinance`. Yahoo's terms restrict
 commercial use, so treat it as a research source only.
 
